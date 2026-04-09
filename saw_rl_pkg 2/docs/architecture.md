@@ -1,8 +1,9 @@
+```markdown
 # Mimari
 
 ## Veri akışı
 
-```
+```text
 piaware (Raspberry Pi)
     ↓ pcap kayıt
 adsb_mapper_and_parser.py
@@ -10,7 +11,7 @@ adsb_mapper_and_parser.py
 adsb_preprocessor_v3.py
     ↓ _saw_arrivals.csv + _saw_departures.csv
     ├── real_conflict_checker.py   (kalite doğrulama)
-    ├── RunwayEnv + MaskablePPO    (RL eğitimi)
+    ├── RunwayEnv + MaskablePPO    (RL eğitimi, VecNormalize ile)
     └── benchmark.py               (tüm algoritmalar)
 ```
 
@@ -23,8 +24,8 @@ adsb_preprocessor_v3.py
 
 ## State Space (RunwayEnv)
 
-`N_WINDOW × N_FEATURES` = 10 × 9 = 90 boyutlu gözlem vektörü.  
-Her uçak için 9 feature, `[-1, 1]` aralığına normalize edilmiş:
+`N_WINDOW × N_FEATURES` = 10 × 10 = 100 boyutlu gözlem vektörü.  
+Her uçak için 10 feature bulunur. **Stable Baselines3 VecNormalize** ile dinamik olarak normalize edilir (`norm_obs=True`):
 
 | Index | Feature | Açıklama |
 |-------|---------|----------|
@@ -37,6 +38,7 @@ Her uçak için 9 feature, `[-1, 1]` aralığına normalize edilmiş:
 | 6 | `phase_enc` | 0=ARRIVAL, 1=DEPARTURE |
 | 7 | `fcfs_rank` | FCFS sırası |
 | 8 | `hdg_diff` | Piste yöneliş farkı (°) |
+| 9 | `current_sep` | Önceki uçakla gereken ayrım (Wake + ROT) (sn) |
 
 ## Action Space
 
@@ -44,21 +46,25 @@ Her uçak için 9 feature, `[-1, 1]` aralığına normalize edilmiş:
 
 Action masking ile MPS_K dışına çıkan seçimler yasaklanır.
 
-## Reward Fonksiyonu
+## Reward Fonksiyonu (Göreceli Boşluk / Relative Gap)
 
-```
-reward = R_SUCCESS + R_DELAY_PER_MIN × delay_min
+Modelin amacı uçağın gecikmesini değil, **pistin boş kaldığı süreyi (gap)** minimize etmektir. Ödül, FCFS'ye kıyasla kazanılan/kaybedilen zaman farkı üzerinden hesaplanır.
+
+```python
+gap_model = (sched_ts_model - last_ts) / 60.0
+gap_fcfs  = (sched_ts_fcfs - last_ts) / 60.0
+
+reward = (gap_fcfs - gap_model) * 10.0
        [ + R_CPS_VIOLATION  (MPS ihlali varsa) ]
 
-R_SUCCESS       = +100.0
-R_DELAY_PER_MIN =  -2.0
-R_CPS_VIOLATION = -100.0
+R_CPS_VIOLATION = -10.0
 MAX_DELAY_MIN   =  90.0   (truncation eşiği)
 ```
+*(Not: Modelin bu sinyali doğru yorumlayabilmesi için eğitim sırasında ödül normalizasyonu kapatılmıştır: `norm_reward=False`)*
 
 ## Meta-Heuristik Mimari
 
-```
+```text
 BaseOptimizer (abstract)
 ├── _load_data()       — CSV yükleme, numpy cache
 ├── _eval_sequence()   — maliyet = gecikme + MPS cezası
@@ -73,8 +79,10 @@ BaseOptimizer (abstract)
 
 ## Normalizasyon
 
-`_obs_lo` / `_obs_hi` **instance-level** array'ler — her `RunwayEnv`
-örneği kendi kopyasını tutar. `_obs_hi[7]` = `n_total` (veri setine göre dinamik).
+Eski mimaride `_obs_lo` / `_obs_hi` array'leri ile manuel clipping uygulanıyordu (Bu konudaki eski global array hatası için bkz. ADR-003).
 
-> ⚠️ Eski kodda `_HI[7]` global array'i mutasyona uğratıyordu.
-> Bu bug `runway_env.py` refactor'ında düzeltildi. (bkz. `docs/decisions.md` ADR-003)
+**Güncel Mimari:**
+Manuel statik limitler büyük oranda terkedilmiş olup **Stable Baselines3 VecNormalize** wrapper'ı kullanılmaktadır.
+- **`norm_obs=True`**: Gözlemlerin dinamik olarak hareketli ortalaması alınarak normalize edilir. Model bu sayede yeni veri setlerindeki farklı ETA sapmalarına karşı "kör" olmaz.
+- **`norm_reward=False`**: Göreceli Ödül (Relative Gap) mantığındaki FCFS referans (sıfır) noktasının kaybolmaması için ödül normalizasyonu kapalı tutulur (bkz. ADR-014).
+```

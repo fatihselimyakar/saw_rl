@@ -1,18 +1,19 @@
 """
-SAW Runway Sequencing RL Environment (hızlandırılmış)
+SAW Runway Sequencing RL Environment (Final Versiyon)
 ======================================================
 Gymnasium-compatible environment.
 
 Observation : Rolling window N_WINDOW uçak × N_FEATURES özellik
 Action      : Discrete(N_WINDOW) — hangi uçağı sıradaki seçiyoruz
-Reward      : -delay_min + success_bonus - constraint_penalty
+Reward      : Göreceli Boşluk (Relative Gap) x 10 
+              (FCFS'e göre ne kadar saniye kazandırdı?)
 """
 
 import numpy as np
 import pandas as pd
 import gymnasium as gym
 from gymnasium import spaces
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # ──────────────────────────────────────────────
 # RECAT-EU Wake Turbulence Separation (saniye)
@@ -32,14 +33,12 @@ CAT_MAP = {'A0':0, 'A1':1, 'A2':2, 'A3':3, 'A4':4, 'A5':5}
 
 N_WINDOW   = 10
 N_FEATURES = 10
-MPS_K      = 10
+MPS_K      = 3
 
-R_SUCCESS       =  100.0
-R_DELAY_PER_MIN =   -2.0   # Her gecikme dakikası için ceza
-R_CPS_VIOLATION = -100.0   # Sıra bozmayı biraz affedilebilir kılıyoruz.
-MAX_DELAY_MIN   =   90.0
+R_CPS_VIOLATION = -10.0   
+MAX_DELAY_MIN   =  90.0
 
-# Normalizasyon sınırları [eta_sec, dist, alt, gs, rate, cat, phase, fcfs, hdg]
+# Clip sınırları (VecNormalize kullansak da aşırı sapan verileri törpülemek için)
 _LO = np.array([-600.0,  0.0,    0.0, 100.0, -4000.0, 0.0, 0.0,   0.0,   0.0,   0.0], dtype=np.float32)
 _HI = np.array([7200.0, 200.0, 45000.0, 600.0,  4000.0, 5.0, 1.0, 500.0, 180.0, 160.0], dtype=np.float32)
 
@@ -54,12 +53,10 @@ class RunwayEnv(gym.Env):
     metadata = {"render_modes": ["human"]}
 
     def __init__(self, arrivals_csv, departures_csv,
-                 n_window=N_WINDOW, mps_k=MPS_K,
-                 delay_penalty=R_DELAY_PER_MIN, render_mode=None):
+                 n_window=N_WINDOW, mps_k=MPS_K, render_mode=None):
         super().__init__()
         self.n_window    = n_window
         self.mps_k       = mps_k
-        self.delay_pen   = delay_penalty
         self.render_mode = render_mode
 
         self._load_data(arrivals_csv, departures_csv)
@@ -72,7 +69,6 @@ class RunwayEnv(gym.Env):
         self.action_space = spaces.Discrete(n_window)
         self.reset()
 
-    # ── Veri Yükleme ──────────────────────────────────────────────
     def _load_data(self, arr_csv, dep_csv):
         arr = pd.read_csv(arr_csv, parse_dates=['target_time', 'last_seen'])
         dep = pd.read_csv(dep_csv, parse_dates=['target_time', 'last_seen'])
@@ -90,13 +86,11 @@ class RunwayEnv(gym.Env):
             df['alt_last']      = df['alt_last'].fillna(10000.0)
 
         self.df = pd.concat([arr, dep], ignore_index=True)
-        # NaT target_time olan satırları filtrele (window sıralamasını bozar)
         self.df = self.df.dropna(subset=['target_time'])
         self.df = self.df.sort_values('target_time').reset_index(drop=True)
         self.df['fcfs_rank'] = np.arange(len(self.df))
         self.n_total = len(self.df)
 
-        # Numpy cache — pandas her step'te yavaş
         self._ts     = np.array([t.timestamp() for t in self.df["target_time"]], dtype=np.float64)
         self._dist   = self.df['dist_km'].values.astype(np.float32)
         self._alt    = self.df['alt_last'].values.astype(np.float32)
@@ -106,11 +100,10 @@ class RunwayEnv(gym.Env):
         self._phase  = self.df['phase_enc'].values.astype(np.float32)
         self._fcfs   = self.df['fcfs_rank'].values.astype(np.float32)
         self._hdg    = self.df['hdg_diff'].values.astype(np.float32)
-        self._catstr = self.df['category'].values   # string, wake sep için
+        self._catstr = self.df['category'].values
 
-        _HI[7] = float(self.n_total)  # fcfs normalizasyon üst sınırı
+        _HI[7] = float(self.n_total)
 
-    # ── Reset ─────────────────────────────────────────────────────
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self.done_mask     = np.zeros(self.n_total, dtype=bool)
@@ -123,45 +116,62 @@ class RunwayEnv(gym.Env):
         self._win_cache    = None
         return self._get_obs(), {}
 
-    # ── Step ──────────────────────────────────────────────────────
     def step(self, action: int):
         window = self._get_window()
 
         if action >= len(window):
-            # Geçersiz action maskeleme hatası için
             return self._get_obs(), R_CPS_VIOLATION, False, False, {'invalid': True}
 
+        # 1. Modelin Seçimi
         idx = int(window[action])
-
-        # Scheduled time: max(earliest, last + separation)
         earliest_ts = self._ts[idx]
         sep_sec     = get_sep(self.last_cat, self._catstr[idx])
         sched_ts    = max(earliest_ts, self.last_ts + sep_sec)
-        delay_min   = max(0.0, (sched_ts - earliest_ts) / 60.0)
+        
+        gap_model_min = (sched_ts - self.last_ts) / 60.0
+        model_delay_min = max(0.0, (sched_ts - earliest_ts) / 60.0) 
 
-        # CPS kısıtı
+        # 2. FCFS'in Seçimi (Referans)
+        valid_indices = []
+        sched_pos = len(self.scheduled)
+        for w_idx in window:
+            if abs(sched_pos - int(self._fcfs[w_idx])) <= self.mps_k:
+                valid_indices.append(w_idx)
+        
+        if not valid_indices:
+            valid_indices = list(window)
+            
+        fcfs_idx = valid_indices[np.argmin([self._fcfs[i] for i in valid_indices])]
+        earliest_ts_fcfs = self._ts[fcfs_idx]
+        sep_sec_fcfs     = get_sep(self.last_cat, self._catstr[fcfs_idx])
+        sched_ts_fcfs    = max(earliest_ts_fcfs, self.last_ts + sep_sec_fcfs)
+        
+        gap_fcfs_min = (sched_ts_fcfs - self.last_ts) / 60.0
+
+        # 3. ÖDÜL: Göreceli Boşluk (Sinyali güçlendirmek için 10 ile çarpıyoruz)
+        reward = (gap_fcfs_min - gap_model_min) * 10.0
+
+        # CPS kısıtı kontrolü
         cps_viol = abs(len(self.scheduled) - int(self._fcfs[idx])) > self.mps_k
-
-        reward = R_SUCCESS + self.delay_pen * delay_min
         if cps_viol:
             reward += R_CPS_VIOLATION
             self.violations += 1
 
+        # 4. State Güncellemesi
         self.done_mask[idx] = True
         self.scheduled.append(idx)
-        self.last_ts    = sched_ts
-        self.last_cat   = self._catstr[idx]
-        self.total_delay   += delay_min
-        self.current_step  += 1
-        self._win_cache     = None
+        self.last_ts       = sched_ts
+        self.last_cat      = self._catstr[idx]
+        self.total_delay  += model_delay_min
+        self.current_step += 1
+        self._win_cache    = None
 
         terminated = bool(len(self.scheduled) == self.n_total)
-        truncated  = bool(delay_min > MAX_DELAY_MIN)
+        truncated  = bool(model_delay_min > MAX_DELAY_MIN)
 
-        info = {'delay_min': round(delay_min, 2), 'cps_viol': cps_viol,
+        info = {'delay_min': round(model_delay_min, 2), 'cps_viol': cps_viol,
                 'total_delay': round(self.total_delay, 2)}
         
-        # DÜZELTME BURADA: Sadece terminated değil, truncated (yarıda kesilme) durumunda da karneyi ver
         if terminated or truncated:
             info['episode_summary'] = {
                 'total_delay_min': round(self.total_delay, 2),
@@ -169,9 +179,9 @@ class RunwayEnv(gym.Env):
                 'violations'     : self.violations,
                 'avg_delay_min'  : round(self.total_delay / max(len(self.scheduled), 1), 2),
             }
+            
         return self._get_obs(), reward, terminated, truncated, info
 
-   # ── Window ────────────────────────────────────────────────────
     def _get_window(self):
         if self._win_cache is not None:
             return self._win_cache
@@ -180,13 +190,10 @@ class RunwayEnv(gym.Env):
             self._win_cache = []
             return []
         
-        # DÜZELTME BURADA: kind='stable' eklendi. (Aynı saniyede gelenleri karıştırmaz)
         order = np.argsort(self._ts[remaining], kind='stable') 
-        
         self._win_cache = remaining[order[:self.n_window]]
         return self._win_cache
 
-    # ── Observation ───────────────────────────────────────────────
     def _get_obs(self) -> np.ndarray:
         window = self._get_window()
         obs    = np.zeros((self.n_window, N_FEATURES), dtype=np.float32)
@@ -210,7 +217,6 @@ class RunwayEnv(gym.Env):
 
         return np.nan_to_num(obs.flatten(), nan=0.0, posinf=1.0, neginf=-1.0)
 
-    # ── Action Mask ───────────────────────────────────────────────
     def action_masks(self) -> np.ndarray:
         window    = self._get_window()
         mask      = np.zeros(self.n_window, dtype=bool)
@@ -222,7 +228,6 @@ class RunwayEnv(gym.Env):
             mask[:len(window)] = True
         return mask
 
-    # ── Render ────────────────────────────────────────────────────
     def render(self):
         if self.render_mode != "human":
             return
