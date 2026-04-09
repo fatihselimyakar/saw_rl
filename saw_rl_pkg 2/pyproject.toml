@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "saw-rl"
+version = "0.1.0"
+description = "Runway Optimization Using Reinforcement Learning — SAW"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "pandas",
+    "gymnasium",
+    "stable-baselines3",
+    "sb3-contrib",
+    "scipy",
+    "deap",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+dev = ["pyshark"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["saw_rl*"]
+
+[project.scripts]
+saw-benchmark = "saw_rl.benchmark:main"

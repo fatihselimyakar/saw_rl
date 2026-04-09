@@ -1,0 +1,15 @@
+Metadata-Version: 2.4
+Name: saw-rl
+Version: 0.1.0
+Summary: Runway Optimization Using Reinforcement Learning — SAW
+Requires-Python: >=3.10
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: gymnasium
+Requires-Dist: stable-baselines3
+Requires-Dist: sb3-contrib
+Requires-Dist: scipy
+Requires-Dist: deap
+Requires-Dist: tqdm
+Provides-Extra: dev
+Requires-Dist: pyshark; extra == "dev"

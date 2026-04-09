@@ -1,0 +1,65 @@
+{
+  "timestamp": "2026-04-07T23:56:46.651859",
+  "config": {
+    "arr": "data/adsb2_rapor_saw_arrivals.csv",
+    "dep": "data/adsb2_rapor_saw_departures.csv",
+    "window": 10,
+    "mps_k": 3,
+    "skip": [],
+    "out": "data/results.json",
+    "quiet": false
+  },
+  "fcfs": {
+    "algorithm": "FCFS",
+    "total_delay_min": 3040.82,
+    "avg_delay_per_ac": 7.24,
+    "violations": 0,
+    "n_scheduled": 420,
+    "elapsed_sec": 0.03
+  },
+  "results": [
+    {
+      "algorithm": "Tabu Search",
+      "total_delay_min": 2981.22,
+      "avg_delay_per_ac": 7.098,
+      "violations": 0,
+      "n_scheduled": 420,
+      "elapsed_sec": 8.42
+    },
+    {
+      "algorithm": "Simulated Annealing",
+      "total_delay_min": 2981.22,
+      "avg_delay_per_ac": 7.098,
+      "violations": 0,
+      "n_scheduled": 420,
+      "elapsed_sec": 19.37
+    },
+    {
+      "algorithm": "Genetic Algorithm",
+      "total_delay_min": 3055.97,
+      "avg_delay_per_ac": 7.276,
+      "violations": 0,
+      "n_scheduled": 420,
+      "elapsed_sec": 7.93
+    },
+    {
+      "algorithm": "Ant Colony Optimization",
+      "total_delay_min": 9249.32,
+      "avg_delay_per_ac": 22.022,
+      "violations": 6,
+      "n_scheduled": 420,
+      "elapsed_sec": 38.64
+    },
+    {
+      "algorithm": "MaskablePPO (RL)",
+      "total_delay_min": 3038.1,
+      "avg_delay_per_ac": 7.23,
+      "violations": 1,
+      "n_scheduled": 410,
+      "elapsed_sec": null,
+      "training_timesteps": 500000,
+      "seed": 42,
+      "note": "1 gunluk veri, 410 ucak, MPS_K=3, 40k adimda FCFS yakinsar"
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+[console_scripts]
+saw-benchmark = saw_rl.benchmark:main

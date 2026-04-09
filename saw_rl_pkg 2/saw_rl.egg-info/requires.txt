@@ -1,0 +1,11 @@
+numpy
+pandas
+gymnasium
+stable-baselines3
+sb3-contrib
+scipy
+deap
+tqdm
+
+[dev]
+pyshark
