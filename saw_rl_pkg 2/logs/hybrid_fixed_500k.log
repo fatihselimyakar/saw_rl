@@ -1,0 +1,125 @@
+============================================================
+SAW Runway Sequencing — MaskablePPO (Final)
+============================================================
+    seed=1663910106
+[*] Environment kontrolü yapılıyor...
+    ✓ Environment geçerli.
+
+[*] FCFS baseline hesaplanıyor...
+    FCFS Toplam gecikme : 3040.8 dk
+
+[*] MaskablePPO modeli oluşturuluyor...
+    reward_alpha=10.0  reward_beta=10.0
+
+[*] Eğitim başlıyor (500,000 timestep)...
+
+  [Step   10000] Ort gecikme: 4369.5 dk | Min: 3706.0 dk
+  [Step   20000] Ort gecikme: 3939.3 dk | Min: 3539.3 dk
+Eval num_timesteps=20000, episode_reward=-644.10 +/- 0.00
+Episode length: 418.00 +/- 0.00
+New best mean reward!
+  [Step   30000] Ort gecikme: 3635.5 dk | Min: 3285.9 dk
+  [Step   40000] Ort gecikme: 3417.7 dk | Min: 3137.9 dk
+Eval num_timesteps=40000, episode_reward=-487.32 +/- 0.00
+Episode length: 418.00 +/- 0.00
+New best mean reward!
+  [Step   50000] Ort gecikme: 3400.6 dk | Min: 3202.9 dk
+  [Step   60000] Ort gecikme: 3302.6 dk | Min: 3173.3 dk
+Eval num_timesteps=60000, episode_reward=-519.20 +/- 0.00
+Episode length: 418.00 +/- 0.00
+  [Step   70000] Ort gecikme: 3361.5 dk | Min: 3185.6 dk
+  [Step   80000] Ort gecikme: 3422.6 dk | Min: 3239.8 dk
+Eval num_timesteps=80000, episode_reward=-477.17 +/- 0.00
+Episode length: 418.00 +/- 0.00
+New best mean reward!
+  [Step   90000] Ort gecikme: 3389.3 dk | Min: 3306.1 dk
+  [Step  100000] Ort gecikme: 3329.3 dk | Min: 3277.1 dk
+Eval num_timesteps=100000, episode_reward=-434.06 +/- 0.00
+Episode length: 418.00 +/- 0.00
+New best mean reward!
+  [Step  110000] Ort gecikme: 3327.0 dk | Min: 3237.6 dk
+  [Step  120000] Ort gecikme: 3298.9 dk | Min: 3237.6 dk
+Eval num_timesteps=120000, episode_reward=-433.84 +/- 0.00
+Episode length: 418.00 +/- 0.00
+New best mean reward!
+  [Step  130000] Ort gecikme: 3864.8 dk | Min: 3558.3 dk
+  [Step  140000] Ort gecikme: 3995.2 dk | Min: 3558.3 dk
+Eval num_timesteps=140000, episode_reward=-621.37 +/- 0.00
+Episode length: 418.00 +/- 0.00
+  [Step  150000] Ort gecikme: 4041.0 dk | Min: 3572.1 dk
+  [Step  160000] Ort gecikme: 4019.4 dk | Min: 3068.7 dk
+Eval num_timesteps=160000, episode_reward=-621.37 +/- 0.00
+Episode length: 418.00 +/- 0.00
+  [Step  170000] Ort gecikme: 4019.6 dk | Min: 3071.8 dk
+  [Step  180000] Ort gecikme: 4069.4 dk | Min: 4069.4 dk
+Eval num_timesteps=180000, episode_reward=-621.37 +/- 0.00
+Episode length: 418.00 +/- 0.00
+  [Step  190000] Ort gecikme: 4069.4 dk | Min: 4069.4 dk
+  [Step  200000] Ort gecikme: 4069.4 dk | Min: 4069.4 dk
+Eval num_timesteps=200000, episode_reward=-621.37 +/- 0.00
+Episode length: 418.00 +/- 0.00
+  [Step  210000] Ort gecikme: 4069.4 dk | Min: 4069.4 dk
+  [Step  220000] Ort gecikme: 4043.6 dk | Min: 3552.2 dk
+Eval num_timesteps=220000, episode_reward=-621.37 +/- 0.00
+Episode length: 418.00 +/- 0.00
+  [Step  230000] Ort gecikme: 4066.4 dk | Min: 4009.6 dk
+  [Step  240000] Ort gecikme: 4066.4 dk | Min: 4009.0 dk
+Eval num_timesteps=240000, episode_reward=-621.37 +/- 0.00
+Episode length: 418.00 +/- 0.00
+  [Step  250000] Ort gecikme: 4069.4 dk | Min: 4069.4 dk
+  [Step  260000] Ort gecikme: 4069.4 dk | Min: 4069.4 dk
+Eval num_timesteps=260000, episode_reward=-621.37 +/- 0.00
+Episode length: 418.00 +/- 0.00
+  [Step  270000] Ort gecikme: 4018.7 dk | Min: 3055.3 dk
+  [Step  280000] Ort gecikme: 4069.4 dk | Min: 4069.4 dk
+Eval num_timesteps=280000, episode_reward=-621.37 +/- 0.00
+Episode length: 418.00 +/- 0.00
+  [Step  290000] Ort gecikme: 4071.0 dk | Min: 4069.4 dk
+  [Step  300000] Ort gecikme: 4077.0 dk | Min: 4069.4 dk
+Eval num_timesteps=300000, episode_reward=-622.26 +/- 0.00
+Episode length: 418.00 +/- 0.00
+  [Step  310000] Ort gecikme: 4083.5 dk | Min: 3992.9 dk
+  [Step  320000] Ort gecikme: 3993.8 dk | Min: 3074.1 dk
+Eval num_timesteps=320000, episode_reward=-638.90 +/- 0.00
+Episode length: 418.00 +/- 0.00
+  [Step  330000] Ort gecikme: 4052.4 dk | Min: 3959.2 dk
+  [Step  340000] Ort gecikme: 3748.5 dk | Min: 3046.2 dk
+Eval num_timesteps=340000, episode_reward=-621.80 +/- 0.00
+Episode length: 418.00 +/- 0.00
+  [Step  350000] Ort gecikme: 3694.6 dk | Min: 3047.3 dk
+  [Step  360000] Ort gecikme: 3717.4 dk | Min: 3058.2 dk
+Eval num_timesteps=360000, episode_reward=-607.90 +/- 0.00
+Episode length: 418.00 +/- 0.00
+  [Step  370000] Ort gecikme: 3716.8 dk | Min: 3056.5 dk
+  [Step  380000] Ort gecikme: 3218.9 dk | Min: 3054.4 dk
+Eval num_timesteps=380000, episode_reward=-447.31 +/- 0.00
+Episode length: 418.00 +/- 0.00
+  [Step  390000] Ort gecikme: 3683.0 dk | Min: 3058.5 dk
+  [Step  400000] Ort gecikme: 3952.7 dk | Min: 3103.9 dk
+Eval num_timesteps=400000, episode_reward=-515.31 +/- 0.00
+Episode length: 418.00 +/- 0.00
+  [Step  410000] Ort gecikme: 3611.3 dk | Min: 3235.1 dk
+  [Step  420000] Ort gecikme: 3599.8 dk | Min: 3310.5 dk
+Eval num_timesteps=420000, episode_reward=-434.50 +/- 0.00
+Episode length: 418.00 +/- 0.00
+  [Step  430000] Ort gecikme: 3576.6 dk | Min: 3310.5 dk
+  [Step  440000] Ort gecikme: 3652.9 dk | Min: 3311.2 dk
+Eval num_timesteps=440000, episode_reward=-434.50 +/- 0.00
+Episode length: 418.00 +/- 0.00
+  [Step  450000] Ort gecikme: 3425.2 dk | Min: 3311.2 dk
+  [Step  460000] Ort gecikme: 3333.1 dk | Min: 3061.0 dk
+Eval num_timesteps=460000, episode_reward=-434.50 +/- 0.00
+Episode length: 418.00 +/- 0.00
+  [Step  470000] Ort gecikme: 3502.6 dk | Min: 3235.2 dk
+  [Step  480000] Ort gecikme: 3565.8 dk | Min: 3310.5 dk
+Eval num_timesteps=480000, episode_reward=-523.89 +/- 0.00
+Episode length: 418.00 +/- 0.00
+  [Step  490000] Ort gecikme: 3661.2 dk | Min: 3289.4 dk
+  [Step  500000] Ort gecikme: 3795.6 dk | Min: 3313.2 dk
+Eval num_timesteps=500000, episode_reward=-547.78 +/- 0.00
+Episode length: 418.00 +/- 0.00
+
+[✓] Final Model ve Normalizasyon istatistikleri kaydedildi.
+[✓] En iyi model 'models/hybrid_fixed_500k/best_model' klasöründe!
+    → İnference için: best_model.zip + vec_normalize_best.pkl
+

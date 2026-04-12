@@ -5,8 +5,10 @@ Gymnasium-compatible environment.
 
 Observation : Rolling window N_WINDOW uçak × N_FEATURES özellik
 Action      : Discrete(N_WINDOW) — hangi uçağı sıradaki seçiyoruz
-Reward      : Göreceli Boşluk (Relative Gap) x 10 
-              (FCFS'e göre ne kadar saniye kazandırdı?)
+Reward      : Hibrit Göreceli Ödül
+              reward = (gap_fcfs - gap_model) * reward_alpha     [pist boşluğu, FCFS'e göre]
+                     - (model_delay / MAX_DELAY) * reward_beta   [bu uçağa yüklenen gecikme]
+              Varsayılan: alpha=10, beta=0 → saf gap reward (kanıtlanmış baseline)
 """
 
 import numpy as np
@@ -15,49 +17,33 @@ import gymnasium as gym
 from gymnasium import spaces
 from datetime import datetime
 
-# ──────────────────────────────────────────────
-# RECAT-EU Wake Turbulence Separation (saniye)
-# ──────────────────────────────────────────────
-WAKE_SEP = {
-    ('A5','A5'):120, ('A5','A4'):100, ('A5','A3'):120, ('A5','A2'):140, ('A5','A1'):160,
-    ('A4','A5'): 80, ('A4','A4'):100, ('A4','A3'):120, ('A4','A2'):120, ('A4','A1'):140,
-    ('A3','A5'): 80, ('A3','A4'): 80, ('A3','A3'): 80, ('A3','A2'):100, ('A3','A1'):120,
-    ('A2','A5'): 80, ('A2','A4'): 80, ('A2','A3'): 80, ('A2','A2'): 80, ('A2','A1'):100,
-    ('A1','A5'): 80, ('A1','A4'): 80, ('A1','A3'): 80, ('A1','A2'): 80, ('A1','A1'): 80,
-    ('A0','A5'): 80, ('A0','A4'): 80, ('A0','A3'): 80, ('A0','A2'):100, ('A0','A1'):120,
-    ('A5','A0'):120, ('A4','A0'):120, ('A3','A0'): 80, ('A2','A0'): 80, ('A1','A0'): 80,
-    ('A0','A0'): 80,
-}
-ROT     = {'A5':65, 'A4':65, 'A3':55, 'A2':45, 'A1':38, 'A0':55}
-CAT_MAP = {'A0':0, 'A1':1, 'A2':2, 'A3':3, 'A4':4, 'A5':5}
+from saw_rl.constants import CAT_MAP, get_sep
 
 N_WINDOW   = 10
 N_FEATURES = 10
 MPS_K      = 3
 
-R_CPS_VIOLATION = -10.0   
+R_CPS_VIOLATION = -10.0
 MAX_DELAY_MIN   =  90.0
 
 # Clip sınırları (VecNormalize kullansak da aşırı sapan verileri törpülemek için)
+# index 7 (fcfs_rank) üst sınırı runtime'da instance-level set edilir (bkz. ADR-003)
 _LO = np.array([-600.0,  0.0,    0.0, 100.0, -4000.0, 0.0, 0.0,   0.0,   0.0,   0.0], dtype=np.float32)
 _HI = np.array([7200.0, 200.0, 45000.0, 600.0,  4000.0, 5.0, 1.0, 500.0, 180.0, 160.0], dtype=np.float32)
-
-
-def get_sep(leader: str, follower: str) -> float:
-    wake = WAKE_SEP.get((leader, follower), 80)
-    rot  = ROT.get(leader, 55)
-    return float(max(wake, rot))
 
 
 class RunwayEnv(gym.Env):
     metadata = {"render_modes": ["human"]}
 
     def __init__(self, arrivals_csv, departures_csv,
-                 n_window=N_WINDOW, mps_k=MPS_K, render_mode=None):
+                 n_window=N_WINDOW, mps_k=MPS_K, render_mode=None,
+                 reward_alpha=10.0, reward_beta=0.0):
         super().__init__()
-        self.n_window    = n_window
-        self.mps_k       = mps_k
-        self.render_mode = render_mode
+        self.n_window     = n_window
+        self.mps_k        = mps_k
+        self.render_mode  = render_mode
+        self.reward_alpha = reward_alpha
+        self.reward_beta  = reward_beta
 
         self._load_data(arrivals_csv, departures_csv)
 
@@ -67,7 +53,7 @@ class RunwayEnv(gym.Env):
             dtype=np.float32,
         )
         self.action_space = spaces.Discrete(n_window)
-        self.reset()
+        # reset() __init__ içinde çağrılmaz; SB3 eğitim öncesi reset() çağırır
 
     def _load_data(self, arr_csv, dep_csv):
         arr = pd.read_csv(arr_csv, parse_dates=['target_time', 'last_seen'])
@@ -102,7 +88,9 @@ class RunwayEnv(gym.Env):
         self._hdg    = self.df['hdg_diff'].values.astype(np.float32)
         self._catstr = self.df['category'].values
 
-        _HI[7] = float(self.n_total)
+        # ADR-003: global _HI'yi mutasyona uğratmak yerine instance-level kopya al
+        self._obs_hi = np.array(_HI)
+        self._obs_hi[7] = float(self.n_total)
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -148,8 +136,12 @@ class RunwayEnv(gym.Env):
         
         gap_fcfs_min = (sched_ts_fcfs - self.last_ts) / 60.0
 
-        # 3. ÖDÜL: Göreceli Boşluk (Sinyali güçlendirmek için 10 ile çarpıyoruz)
-        reward = (gap_fcfs_min - gap_model_min) * 10.0
+        # 3. ÖDÜL: Hibrit Göreceli Ödül
+        #   gap bileşeni   — FCFS'e göre pist boşluğunu minimize et (dominant sinyal)
+        #   delay bileşeni — bu uçağa yüklenen gecikmeyi penalize et (FCFS karşılaştırması yok)
+        #                    normalize: model_delay_min / MAX_DELAY_MIN → [0, 1]
+        reward = (gap_fcfs_min - gap_model_min) * self.reward_alpha \
+               - (model_delay_min / MAX_DELAY_MIN) * self.reward_beta
 
         # CPS kısıtı kontrolü
         cps_viol = abs(len(self.scheduled) - int(self._fcfs[idx])) > self.mps_k
@@ -213,7 +205,7 @@ class RunwayEnv(gym.Env):
                 self._hdg[idx],
                 current_sep,
             ], dtype=np.float32)
-            obs[i] = np.clip(2.0 * (raw - _LO) / (_HI - _LO + 1e-8) - 1.0, -1.0, 1.0)
+            obs[i] = np.clip(2.0 * (raw - _LO) / (self._obs_hi - _LO + 1e-8) - 1.0, -1.0, 1.0)
 
         return np.nan_to_num(obs.flatten(), nan=0.0, posinf=1.0, neginf=-1.0)
 

@@ -1,4 +1,3 @@
-```markdown
 # Mimari
 
 ## Veri akışı
@@ -81,8 +80,7 @@ BaseOptimizer (abstract)
 
 Eski mimaride `_obs_lo` / `_obs_hi` array'leri ile manuel clipping uygulanıyordu (Bu konudaki eski global array hatası için bkz. ADR-003).
 
-**Güncel Mimari:**
+**Güncel Mimari (bkz. ADR-014):**
 Manuel statik limitler büyük oranda terkedilmiş olup **Stable Baselines3 VecNormalize** wrapper'ı kullanılmaktadır.
 - **`norm_obs=True`**: Gözlemlerin dinamik olarak hareketli ortalaması alınarak normalize edilir. Model bu sayede yeni veri setlerindeki farklı ETA sapmalarına karşı "kör" olmaz.
 - **`norm_reward=False`**: Göreceli Ödül (Relative Gap) mantığındaki FCFS referans (sıfır) noktasının kaybolmaması için ödül normalizasyonu kapalı tutulur (bkz. ADR-014).
-```

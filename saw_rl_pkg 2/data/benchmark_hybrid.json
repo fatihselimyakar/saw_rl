@@ -1,0 +1,50 @@
+{
+  "timestamp": "2026-04-12T17:30:52.350394",
+  "config": {
+    "arr": "data/adsb2_rapor_saw_arrivals.csv",
+    "dep": "data/adsb2_rapor_saw_departures.csv",
+    "window": 10,
+    "mps_k": 3,
+    "skip": [
+      "ga",
+      "aco"
+    ],
+    "out": "data/benchmark_hybrid.json",
+    "quiet": false,
+    "model_dir": "models/hybrid_gap_delay_2M"
+  },
+  "fcfs": {
+    "algorithm": "FCFS",
+    "total_delay_min": 3040.82,
+    "avg_delay_per_ac": 7.24,
+    "violations": 0,
+    "n_scheduled": 420,
+    "elapsed_sec": 0.04
+  },
+  "results": [
+    {
+      "algorithm": "Tabu Search",
+      "total_delay_min": 3001.55,
+      "avg_delay_per_ac": 7.147,
+      "violations": 0,
+      "n_scheduled": 420,
+      "elapsed_sec": 8.4
+    },
+    {
+      "algorithm": "Simulated Annealing",
+      "total_delay_min": 3001.55,
+      "avg_delay_per_ac": 7.147,
+      "violations": 0,
+      "n_scheduled": 420,
+      "elapsed_sec": 19.53
+    },
+    {
+      "algorithm": "MaskablePPO (RL)",
+      "total_delay_min": 3308.57,
+      "avg_delay_per_ac": 7.878,
+      "violations": 1,
+      "n_scheduled": 420,
+      "elapsed_sec": 0.13
+    }
+  ]
+}

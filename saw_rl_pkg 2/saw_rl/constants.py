@@ -55,7 +55,7 @@ STAGGERED_SEP: int = 45
 
 # RL ortamı varsayılan parametreleri
 DEFAULT_N_WINDOW: int = 10
-DEFAULT_MPS_K: int = 6
+DEFAULT_MPS_K: int = 3
 
 # Normalizasyon sınırları [eta_sec, dist, alt, gs, rate, cat, phase, fcfs, hdg]
 # Not: fcfs üst sınırı (index 7) runtime'da set edilmeli — sabit bırakıldı

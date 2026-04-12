@@ -1,4 +1,3 @@
-```markdown
 # Architecture Decision Records (ADR)
 
 Her önemli teknik karar bu dosyada belgelenir.  
@@ -150,19 +149,18 @@ pcap dosyaları da sorunsuz işleniyor.
 
 ---
 
-## ADR-012: n_steps=420 (1 episode/rollout)
+## ADR-012: n_steps=2048 rollout boyutu
 
-**Karar:** PPO rollout boyutu `n_steps=420` — yaklaşık 1 tam episode  
-**Neden:** - Episode uzunluğu ~410 adım (uçak sayısı). `n_steps` buna eşit olunca
-  her rollout tam bir episode topluyor, yarım episode gradyanı yok.
-- `n_steps=2050` (5 episode) denendi — daha yüksek varyans, daha yavaş convergence.
-- `n_steps=420` ile model 40-50k adımda FCFS performansına ulaştı.
+**Karar:** PPO rollout boyutu `n_steps=2048`  
+**Neden:** - İlk denemede `n_steps=420` (≈1 episode) kullanıldı. Düşük varyans ama yavaş convergence.
+- `n_steps=2048` (~5 episode) ile daha kararlı gradient tahminleri elde edildi.
+- `batch_size=256`, `n_epochs=10` ile birlikte kullanıldığında 2M adımda kararlı öğrenme sağlandı.
 
-**Eğitim parametreleri (eski versiyon):**
+**Eğitim parametreleri (güncel — bkz. ADR-015):**
 ```python
-n_steps=420, batch_size=128, n_epochs=5
-gamma=0.99,  gae_lambda=0.95, ent_coef=0.01
-net_arch=[128, 128], learning_rate=3e-4
+n_steps=2048, batch_size=256, n_epochs=10
+gamma=0.99,   gae_lambda=0.95, ent_coef=0.05
+net_arch=[256, 256, 256], learning_rate=3e-4  # sabit (linear schedule değil)
 ```
 
 ---
@@ -188,4 +186,80 @@ net_arch=[128, 128], learning_rate=3e-4
 **Karar:** Linear schedule yerine sabit `3e-4` LR, `ent_coef=0.05` (yüksek entropi) ve `EvalCallback` kullanımı.  
 **Neden:** - Zamanla azalan LR ve düşük entropi, modelin erken safhalarda bulduğu zayıf stratejilere takılıp kalmasına sebep oldu.
 - Model sürekli yeni yollar denemeye (dalgalanmaya) zorlandı. Bu süreçte şans eseri veya keşif sonucu FCFS'i yendiği o "Kusursuz Sıralama" anları, `EvalCallback` sayesinde otomatik olarak test edilip `best_model.zip` adıyla kaydedildi.
+
+---
+
+## ADR-016: Hibrit Göreceli Ödül Mimarisi
+
+**Karar:** Ödül fonksiyonu salt gap minimizasyonundan (`(gap_fcfs - gap_model) * α`) hibrit formüle dönüştürüldü:
 ```
+reward = (gap_fcfs - gap_model) * α  -  (model_delay / MAX_DELAY) * β
+```
+`α=10, β=10` ile 2M adım eğitim tamamlandı. Training log minimum ~2994.8 dk gösterdi; ancak deterministic best_model eval'i ADR-017 bug'ı nedeniyle geçersizdi. Fix sonrası yeniden eğitim gerekiyor.
+
+**Neden:**  
+- Salt gap ödülü bazı senaryolarda yanlış optimizasyon yapıyordu. Örnek: Heavy ardından Light sıralamasında gap küçük ama gecikme büyük; Light ardından Heavy sıralamasında gap büyük ama toplam gecikme küçük. Model gap'i minimize ederek yanlış uçağı seçiyordu.  
+- İlk hibrit deneme (`delay_fcfs - delay_model` karşılaştırması) reward hacking'e yol açtı: model doğal geç gelen uçakları seçerek `delay_model=0` kazanıyordu, delay 4025 dk'ya çıktı.  
+- **Çözüm:** FCFS karşılaştırması kaldırıldı. `-(model_delay / MAX_DELAY) * β` formülü direkt "bu uçağa ne kadar beklettin?" sorusunu sorar — hile yapılamaz, çünkü geç gelen uçağın zaten `delay=0`'dır.
+
+**Sonuç:** Gap sinyali pist verimliliğini, delay sinyali bireysel adalet/gecikmeyi optimize eder; ikisi birbirini tamamlar.
+
+---
+
+## ADR-017: EvalCallback VecNormalize Senkronizasyon Bug Fix
+
+**Karar:** `train.py`'e `EvalVecNormSyncCallback` eklendi. Her `eval_freq` adımda training VecNormalize `obs_rms`'sini eval env'e kopyalar.
+
+**Neden — Bug:**  
+- `eval_vec_env`, `VecNormalize(training=False)` ile oluşturuluyordu → default istatistikler (mean=0, var=1), hiçbir zaman güncellenmiyordu.  
+- Model training sırasında normalized obs görüyor, eval sırasında ise neredeyse ham obs görüyor.  
+- `EvalCallback` yanlış normalizasyon üzerinden "en iyi model" seçiyordu.  
+- Deterministic best_model eval'i: gap-only → 3533 dk, hibrit → 3308 dk (her ikisi de FCFS'ten kötü).  
+- Raporlanan "iyi" sonuçlar (3029.6, 2994.8 dk) `TrainingLogger`'ın stochastic eğitim episode minimumlarından geliyordu.
+
+**Fix:**
+```python
+class EvalVecNormSyncCallback(BaseCallback):
+    def _on_step(self) -> bool:
+        if self.n_calls % self.eval_freq == 0:
+            self.eval_vn.obs_rms = copy.deepcopy(self.train_vn.obs_rms)
+        return True
+```
+`model.learn(callback=[TrainingLogger(), eval_norm_sync, eval_callback], ...)` şeklinde callback listesine eklendi; `eval_norm_sync` her zaman `eval_callback`'ten önce çalışır.
+
+**Sonuç:** Önceki tüm RL eğitim sonuçları geçersiz sayılmalı. ADR-016 mimarisi doğru; fix sonrası temiz eğitim gerekiyor.
+
+---
+
+## ADR-018: benchmark.py İyileştirmeleri
+
+**Karar:**  
+1. GA ve ACO importları lazy hale getirildi (`deap` yüklü değilse `--skip ga aco` ile çalışsın)  
+2. `--model_dir` parametresi eklendi (default: `models`)  
+3. `run_rl()` içinde best_model için `vec_normalize_best.pkl` öncelikli olarak aranıyor
+
+**Neden:**  
+- Önceki kodda GA/ACO top-level import'tan geliyordu; `deap` kurulu olmayan ortamda tüm benchmark hata veriyordu.  
+- Farklı `save_dir`'larla eğitilen modelleri karşılaştırmak için model dizini CLI'dan belirtilmeli.  
+- best_model ile final model'in farklı VecNormalize istatistiklerine sahip olduğu ortaya çıktı — doğru `.pkl`'nin otomatik seçilmesi gerekiyordu.
+
+---
+
+## ADR-019: Hiperparametre Tuning — LR Schedule, ent_coef, n_steps
+
+**Karar:** Aşamalı tuning sonucu belirlenen optimal hiperparametreler:
+```python
+learning_rate = LinearSchedule(3e-4, 5e-5, 1.0)  # sabit 3e-4'ten schedule'a geçiş
+ent_coef = 0.1        # 0.05'ten artırıldı
+n_steps  = 4096       # 2048'den artırıldı
+```
+
+**Neden — Aşamalı deneme süreci:**
+
+1. **LR schedule (3e-4→5e-5):** Sabit LR ile model step 120k'da iyi bir noktayı bulup collapse ediyordu. Schedule ile collapse step 340k'ya ertelendi, best eval -429.03'e iyileşti.
+
+2. **ent_coef=0.1:** Model iyi sekansları stochastic keşif sırasında bulabiliyor ama deterministic politikaya yansıtamıyordu. Entropi artırılınca keşif uzadı, politika daha iyi oturdu. Best eval -417.69'a iyileşti; collapse ortadan kalktı, 500k boyunca iyileşme devam etti.
+
+3. **n_steps=4096:** En büyük sıçramayı sağladı. Her güncellemede daha fazla episode verisi (~10 episode) toplanınca credit assignment güçlendi. Best eval **-364.17**, deterministic gecikme **3024.9 dk** — FCFS (3040.8 dk) geçildi.
+
+**Sonuç:** 500k adımda FCFS geçildi. Training episode minimumları 3020-3027 dk bandına indi. 2M adımda TS/SA seviyesi (~3001 dk) hedefleniyor.

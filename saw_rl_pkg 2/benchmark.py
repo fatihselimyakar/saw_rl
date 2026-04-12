@@ -23,8 +23,6 @@ import pandas as pd
 
 from saw_rl.optimizers.ts  import TabuSearch
 from saw_rl.optimizers.sa  import SimulatedAnnealing
-from saw_rl.optimizers.ga  import GeneticAlgorithm
-from saw_rl.optimizers.aco import AntColonyOptimization
 from saw_rl.rl.runway_env  import RunwayEnv
 
 
@@ -81,7 +79,13 @@ def run_rl(arr_csv, dep_csv, n_window, mps_k, model_dir='models'):
     vec_env = DummyVecEnv([lambda: base_env])
 
     # 2. Normalizasyon verilerini yukle (Körlüğü önler)
-    norm_path = os.path.join(model_dir, "vec_normalize.pkl")
+    # best_model kullanılıyorsa eşleşen istatistikleri yükle
+    best_norm_path  = os.path.join(model_dir, "best_model", "vec_normalize_best.pkl")
+    final_norm_path = os.path.join(model_dir, "vec_normalize.pkl")
+    if model_path == best_model_path and os.path.exists(best_norm_path):
+        norm_path = best_norm_path
+    else:
+        norm_path = final_norm_path
     if os.path.exists(norm_path):
         vec_env = VecNormalize.load(norm_path, vec_env)
         vec_env.training = False       # Testte yeni veri ogrenme
@@ -182,9 +186,10 @@ def main():
     parser.add_argument('--dep',    required=True)
     parser.add_argument('--window', type=int,  default=10)
     parser.add_argument('--mps_k',  type=int,  default=3)
-    parser.add_argument('--skip',   nargs='*', default=[])
-    parser.add_argument('--out',    default=None)
-    parser.add_argument('--quiet',  action='store_true')
+    parser.add_argument('--skip',      nargs='*', default=[])
+    parser.add_argument('--out',       default=None)
+    parser.add_argument('--quiet',     action='store_true')
+    parser.add_argument('--model_dir', default='models')
     args = parser.parse_args()
 
     skip = {s.lower() for s in (args.skip or [])}
@@ -210,11 +215,19 @@ def main():
               fcfs_result['total_delay_min'], fcfs_result['elapsed_sec']))
 
     # 2-5. Meta-heuristikler
+    def _make_ga():
+        from saw_rl.optimizers.ga import GeneticAlgorithm
+        return GeneticAlgorithm(args.arr, args.dep, args.window, args.mps_k)
+
+    def _make_aco():
+        from saw_rl.optimizers.aco import AntColonyOptimization
+        return AntColonyOptimization(args.arr, args.dep, args.window, args.mps_k)
+
     ALGORITHMS = [
         ('ts',  lambda: TabuSearch(args.arr, args.dep, args.window, args.mps_k)),
         ('sa',  lambda: SimulatedAnnealing(args.arr, args.dep, args.window, args.mps_k)),
-        ('ga',  lambda: GeneticAlgorithm(args.arr, args.dep, args.window, args.mps_k)),
-        ('aco', lambda: AntColonyOptimization(args.arr, args.dep, args.window, args.mps_k)),
+        ('ga',  _make_ga),
+        ('aco', _make_aco),
     ]
 
     results = []
@@ -235,7 +248,7 @@ def main():
     if 'rl' not in skip:
         print('\n[6/6] MaskablePPO (RL) -- model kontrol ediliyor...')
         try:
-            rl_result = run_rl(args.arr, args.dep, args.window, args.mps_k, model_dir='models')
+            rl_result = run_rl(args.arr, args.dep, args.window, args.mps_k, model_dir=args.model_dir)
             results.append(rl_result)
             print('      Gecikme: {:.1f} dk'.format(rl_result['total_delay_min']))
         except Exception as e:

@@ -1,0 +1,17 @@
+# Büyük veri dosyaları
+data/*.txt
+data/*.pcapng
+data/*.kml
+
+# Log ve model binary
+logs/
+models/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# macOS
+.DS_Store

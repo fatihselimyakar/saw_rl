@@ -13,20 +13,25 @@ import numpy as np
 import torch
 
 from stable_baselines3.common.env_checker import check_env
-from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
+from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+from stable_baselines3.common.utils import LinearSchedule
 from sb3_contrib import MaskablePPO
+from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
 from sb3_contrib.common.maskable.utils import get_action_masks
 from sb3_contrib.common.wrappers import ActionMasker
 
 from saw_rl.rl.runway_env import RunwayEnv
 
-def set_seed(seed: int):
+def set_seed(seed: int | None) -> int:
+    if seed is None:
+        seed = random.randint(0, 2**31 - 1)
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
+    return seed
 
 def mask_fn(env) -> np.ndarray:
     return env.action_masks()
@@ -47,6 +52,41 @@ def run_fcfs_baseline(env: RunwayEnv) -> dict:
         'violations'     : summary.get('violations', 0),
     }
 
+class VecNormalizeSyncCallback(BaseCallback):
+    """
+    Best model kaydedildiğinde (callback_on_new_best olarak) VecNormalize
+    istatistiklerini de aynı klasöre kaydet (vec_normalize_best.pkl).
+    Böylece best_model.zip ile normalizasyon istatistikleri her zaman senkronlu kalır.
+    """
+    def __init__(self, vec_normalize: VecNormalize, save_dir: str):
+        super().__init__()
+        self.vec_normalize = vec_normalize
+        self.save_dir      = save_dir
+
+    def _on_step(self) -> bool:
+        self.vec_normalize.save(os.path.join(self.save_dir, "vec_normalize_best.pkl"))
+        return True
+
+
+class EvalVecNormSyncCallback(BaseCallback):
+    """
+    Her eval_freq adımda training VecNormalize istatistiklerini eval env'e kopyalar.
+    Böylece EvalCallback, modelin gerçek (training ile aynı) gözlemler üzerinde
+    değerlendirilmesini sağlar. (ADR-017)
+    """
+    def __init__(self, train_vec_norm: VecNormalize, eval_vec_norm: VecNormalize, eval_freq: int):
+        super().__init__()
+        self.train_vn = train_vec_norm
+        self.eval_vn  = eval_vec_norm
+        self.eval_freq = eval_freq
+
+    def _on_step(self) -> bool:
+        import copy
+        if self.n_calls % self.eval_freq == 0:
+            self.eval_vn.obs_rms = copy.deepcopy(self.train_vn.obs_rms)
+        return True
+
+
 class TrainingLogger(BaseCallback):
     def __init__(self, log_interval=10000, verbose=0):
         super().__init__(verbose)
@@ -65,10 +105,11 @@ class TrainingLogger(BaseCallback):
         return True
 
 def train(args):
-    set_seed(args.seed)
+    args.seed = set_seed(args.seed)
     print("=" * 60)
     print("SAW Runway Sequencing — MaskablePPO (Final)")
     print("=" * 60)
+    print(f"    seed={args.seed}")
 
     # 1. Eğitim Ortamı
     base_env = RunwayEnv(
@@ -76,6 +117,8 @@ def train(args):
         departures_csv=args.dep,
         n_window=args.window,
         mps_k=args.mps_k,
+        reward_alpha=args.reward_alpha,
+        reward_beta=args.reward_beta,
     )
 
     print("[*] Environment kontrolü yapılıyor...")
@@ -94,7 +137,8 @@ def train(args):
     vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=False, clip_obs=10.0)
 
     # 2. Test/Değerlendirme (Evaluation) Ortamı
-    eval_env = RunwayEnv(args.arr, args.dep, n_window=args.window, mps_k=args.mps_k)
+    eval_env = RunwayEnv(args.arr, args.dep, n_window=args.window, mps_k=args.mps_k,
+                         reward_alpha=args.reward_alpha, reward_beta=args.reward_beta)
     eval_env = ActionMasker(eval_env, mask_fn)
     eval_env = Monitor(eval_env)
     eval_vec_env = DummyVecEnv([lambda: eval_env])
@@ -102,27 +146,34 @@ def train(args):
     eval_vec_env = VecNormalize(eval_vec_env, norm_obs=True, norm_reward=False, clip_obs=10.0, training=False)
 
     # En iyi modeli "models/best_model" klasörüne kaydedecek callback
-    eval_callback = EvalCallback(
-        eval_vec_env, 
-        best_model_save_path=os.path.join(args.save_dir, "best_model"),
-        log_path=args.log_dir, 
-        eval_freq=20000,          # Her 20k adımda bir test et
-        deterministic=True,       
-        render=False
+    # MaskableEvalCallback: predict() sırasında action mask uygular (EvalCallback kullanırsan
+    # pencere sonunda geçersiz action seçilip episode sonsuz döngüye girebilir — bkz. ADR-001)
+    best_model_path = os.path.join(args.save_dir, "best_model")
+    eval_freq = 20000
+    # ADR-017: Her eval'den önce training VecNormalize istatistiklerini eval env'e senkronize et
+    eval_norm_sync = EvalVecNormSyncCallback(vec_env, eval_vec_env, eval_freq)
+    eval_callback = MaskableEvalCallback(
+        eval_vec_env,
+        best_model_save_path=best_model_path,
+        log_path=args.log_dir,
+        eval_freq=eval_freq,      # Her 20k adımda bir test et
+        deterministic=True,
+        render=False,
+        callback_on_new_best=VecNormalizeSyncCallback(vec_env, best_model_path),
     )
 
     print(f"\n[*] MaskablePPO modeli oluşturuluyor...")
     model = MaskablePPO(
         policy="MlpPolicy",
         env=vec_env,
-        learning_rate=3e-4,       # Sabit LR
-        n_steps=2048,
+        learning_rate=LinearSchedule(3e-4, 5e-5, 1.0),  # 3e-4 → 5e-5 lineer schedule
+        n_steps=4096,
         batch_size=256,
         n_epochs=10,
         gamma=0.99,
         gae_lambda=0.95,
         clip_range=0.2,
-        ent_coef=0.05,            # Yüksek Entropi (Modele Keşfetmesini Söyler)
+        ent_coef=0.1,            # Yüksek Entropi (Modele Keşfetmesini Söyler)
         vf_coef=0.5,
         max_grad_norm=0.5,
         policy_kwargs=dict(net_arch=[256, 256, 256]),
@@ -131,10 +182,11 @@ def train(args):
         tensorboard_log=args.log_dir or None,
     )
 
+    print(f"    reward_alpha={args.reward_alpha}  reward_beta={args.reward_beta}")
     print(f"\n[*] Eğitim başlıyor ({args.timesteps:,} timestep)...\n")
     model.learn(
         total_timesteps=args.timesteps,
-        callback=[TrainingLogger(), eval_callback],  # Her iki Callback de devrede
+        callback=[TrainingLogger(), eval_norm_sync, eval_callback],  # ADR-017: eval_norm_sync önce çalışır
         progress_bar=False,
         reset_num_timesteps=True,
     )
@@ -143,10 +195,12 @@ def train(args):
     os.makedirs(args.save_dir, exist_ok=True)
     save_path = os.path.join(args.save_dir, "saw_sequencer_final")
     model.save(save_path)
-    # Normalizasyon değerlerini kaydet (Değerlendirme sırasında bu dosyaya ihtiyacın olacak)
+    # Final modelin normalizasyon istatistiklerini kaydet
     vec_env.save(os.path.join(args.save_dir, "vec_normalize.pkl"))
     print(f"\n[✓] Final Model ve Normalizasyon istatistikleri kaydedildi.")
+    # Best model için senkronlu istatistikler best_model/vec_normalize_best.pkl'de
     print(f"[✓] En iyi model '{os.path.join(args.save_dir, 'best_model')}' klasöründe!")
+    print(f"    → İnference için: best_model.zip + vec_normalize_best.pkl")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -155,8 +209,13 @@ if __name__ == "__main__":
     parser.add_argument("--timesteps", type=int,   default=2_000_000) # Timestep 2 milyona çıkarıldı
     parser.add_argument("--window",    type=int,   default=10)
     parser.add_argument("--mps_k",     type=int,   default=3)
-    parser.add_argument("--seed",      type=int,   default=42)
-    parser.add_argument("--save_dir",  default="models")
-    parser.add_argument("--log_dir",   default="logs")
+    parser.add_argument("--seed",      type=int,   default=None,
+                        help="Seed (varsayılan: None → her çalıştırmada random)")
+    parser.add_argument("--save_dir",     default="models")
+    parser.add_argument("--log_dir",      default="logs")
+    parser.add_argument("--reward_alpha", type=float, default=10.0,
+                        help="Gap bileşeni ağırlığı (varsayılan: 10.0)")
+    parser.add_argument("--reward_beta",  type=float, default=0.0,
+                        help="Delay bileşeni ağırlığı (varsayılan: 0.0 = eski davranış)")
     args = parser.parse_args()
     train(args)
