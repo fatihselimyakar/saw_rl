@@ -23,8 +23,8 @@
 - [x] **Hiperparametre tuning** — LR linear schedule (3e-4→5e-5), ent_coef=0.1, n_steps=4096 (ADR-019); 500k adımda FCFS geçildi: 3024.9 dk
 
 ### Meta-heuristikler
-- [x] Tabu Search (`ts.py`) — 2981.2 dk 
-- [x] Simulated Annealing (`sa.py`) — 2981.2 dk
+- [x] Tabu Search (`ts.py`) — 3001.6 dk (çalıştırmalar arası ~20 dk varyans normal)
+- [x] Simulated Annealing (`sa.py`) — 3001.6 dk
 - [x] Genetic Algorithm (`ga.py`) — 3055.9 dk
 - [x] Ant Colony Optimization (`aco.py`)
 
@@ -46,8 +46,8 @@
 - [ ] Çok günlük veriyle RL eğitimi — RL'in asıl "genelleştirme" gücünü kanıtlama
 
 ### Orta vade (tez için kritik)
+- [ ] **İki pist modellemesi** — `RunwayEnv`'e runway assignment action'ı ekle (öncelikli)
 - [ ] Preprocessor v4 — trend-based ETA (scipy linregress), go-around detection
-- [ ] İki pist modellemesi — `RunwayEnv`'e runway assignment action'ı ekle
 - [ ] Curriculum learning — kolay → zor veri seti sıralaması
 
 ### Uzun vade (hibrit hedef)
@@ -73,9 +73,8 @@
 
 ## Açık Sorular
 
-1. **Temiz eğitim sonuçları:** ADR-017 fix'i sonrası hibrit reward modeli gerçekte ne kadar gecikme üretiyor?
-2. **Büyük Veri Avantajı:** 30 günlük veriye geçildiğinde, çok çeşitli trafik paternlerini gören RL, TS/SA'yı tamamen otonom olarak geçebilecek mi?
-3. **İki pist modellemesi:** Runway assignment tezin scope'una giriyor mu?
+1. **Büyük Veri Avantajı:** 30 günlük veriye geçildiğinde, çok çeşitli trafik paternlerini gören RL, TS/SA'yı tamamen otonom olarak geçebilecek mi?
+2. **İki pist modellemesi:** Runway assignment tezin scope'una giriyor mu? (öncelikli hedef olarak belirlendi)
 
 ---
 
